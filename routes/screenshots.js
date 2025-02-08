@@ -1,22 +1,66 @@
 const express = require("express");
 const Screenshot = require("../models/Screenshots");
 const router = express.Router();
+const axios = require("axios");
+const FormData = require("form-data"); // ✅ Import FormData
 
-// POST: Save a screenshot to the database
+const archiver = require("archiver");
+const fs = require("fs");
+const path = require("path");
+
+// // POST: Save a screenshot to the database
+// router.post("/", async (req, res) => {
+//   try {
+//     const { screenshot, timestamp } = req.body;
+
+//     if (!screenshot) {
+//       return res.status(400).json({ error: "Screenshot data is required." });
+//     }
+
+//     const newScreenshot = new Screenshot({ screenshot, timestamp });
+//     await newScreenshot.save();
+
+//     console.log("SS Success");
+
+//     res.status(201).json({ message: "Screenshot saved successfully." });
+//   } catch (error) {
+//     console.error("Error saving screenshot:", error);
+//     res.status(500).json({ error: "Internal server error." });
+//   }
+// });
+
 router.post("/", async (req, res) => {
   try {
     const { screenshot, timestamp } = req.body;
 
-    if (!screenshot) {
-      return res.status(400).json({ error: "Screenshot data is required." });
+    // Validate the screenshot field (Base64 image)
+    if (!screenshot || !/^data:image\/(png|jpeg|jpg);base64,/.test(screenshot)) {
+      return res.status(400).json({ error: "Invalid image format. Must be Base64-encoded PNG/JPG." });
     }
 
-    const newScreenshot = new Screenshot({ screenshot, timestamp });
+    // Create FormData for ImageBB
+    const form = new FormData();
+    form.append("key", '21ec0f957d13640bc92a530e788f6b1e');
+    form.append("image", screenshot.split(",")[1]); // Remove the Base64 prefix
+
+    // Upload image to ImageBB
+    const response = await axios.post("https://api.imgbb.com/1/upload", form, {
+      headers: form.getHeaders(),
+    });
+
+    if (!response.data?.data?.url) {
+      throw new Error("ImageBB upload failed.");
+    }
+
+    const imageUrl = response.data.data.url; // Get the ImageBB URL
+
+    // Save imageUrl and timestamp to the database
+    const newScreenshot = new Screenshot({ screenshot: imageUrl, timestamp: timestamp});
     await newScreenshot.save();
 
-    console.log("SS Success");
+    console.log("Screenshot saved:", imageUrl);
+    res.status(201).json({ message: "Screenshot saved successfully.", imageUrl });
 
-    res.status(201).json({ message: "Screenshot saved successfully." });
   } catch (error) {
     console.error("Error saving screenshot:", error);
     res.status(500).json({ error: "Internal server error." });
@@ -111,6 +155,186 @@ router.delete("/", async (req, res) => {
     res.status(500).json({ error: "Internal server error." });
   }
 });
+
+
+// GET: Download all screenshots as a ZIP file
+router.get("/download", async (req, res) => {
+  try {
+    console.log("Download")
+    const screenshots = await Screenshot.find();
+    if (screenshots.length === 0) {
+      return res.status(404).json({ error: "No screenshots available for download." });
+    }
+
+    const zipPath = path.join(__dirname, "screenshots.zip");
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+
+    output.on("close", () => {
+      res.download(zipPath, "screenshots.zip", (err) => {
+        if (err) console.error("Error sending zip file:", err);
+        fs.unlinkSync(zipPath);
+      });
+    });
+
+    archive.on("error", (err) => {
+      console.error("Error creating zip:", err);
+      res.status(500).json({ error: "Error creating zip file." });
+    });
+
+    archive.pipe(output);
+
+    screenshots.forEach((screenshot, index) => {
+      const fileName = `screenshot_${index + 1}.png`;
+      archive.append(Buffer.from(screenshot.screenshot, "base64"), { name: fileName });
+    });
+
+    archive.finalize();
+  } catch (error) {
+    console.error("Error downloading screenshots:", error);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+// Function to convert base64 to an image file
+const saveBase64Image = (base64String, filePath) => {
+  try {
+    const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
+    fs.writeFileSync(filePath, base64Data, "base64");
+  } catch (error) {
+    console.error("Error saving base64 image:", error);
+  }
+};
+
+
+// GET: Download all screenshots as a ZIP file
+router.get("/download/all", async (req, res) => {
+  try {
+    const screenshots = await Screenshot.find().sort({ timestamp: -1 });
+    if (screenshots.length === 0) {
+      return res.status(404).json({ error: "No screenshots available for download." });
+    }
+
+    const tempDir = path.join(__dirname, "temp_screenshots");
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    screenshots.forEach((screenshot, index) => {
+      if (screenshot.screenshot) {
+        const filePath = path.join(tempDir, `screenshot_${index + 1}.png`);
+        saveBase64Image(screenshot.screenshot, filePath);
+      }
+    });
+
+    const zipPath = path.join(__dirname, `screenshots_all.zip`);
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+
+    output.on("close", () => {
+      res.download(zipPath, "screenshots_all.zip", (err) => {
+        if (err) console.error("Error sending zip file:", err);
+        fs.unlinkSync(zipPath);
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      });
+    });
+
+    archive.on("error", (err) => {
+      console.error("Archive error:", err);
+      res.status(500).json({ error: "Error creating ZIP file." });
+    });
+
+    archive.pipe(output);
+
+    fs.readdirSync(tempDir).forEach((file) => {
+      archive.file(path.join(tempDir, file), { name: file });
+    });
+
+    archive.finalize();
+  } catch (error) {
+    console.error("Error downloading screenshots:", error);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+
+
+
+// GET: Download specified number of screenshots as a ZIP file and delete from the database
+router.get("/download/:count", async (req, res) => {
+  try {
+    const { count } = req.params;
+    const screenshotCount = parseInt(count);
+    if (isNaN(screenshotCount) || screenshotCount <= 0) {
+      return res.status(400).json({ error: "Invalid count parameter." });
+    }
+
+    const screenshots = await Screenshot.find().sort({ timestamp: -1 }).limit(screenshotCount);
+    if (screenshots.length === 0) {
+      return res.status(404).json({ error: "No screenshots available for download." });
+    }
+
+    const tempDir = path.join(__dirname, "temp_screenshots");
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir);
+    }
+
+    screenshots.forEach((screenshot, index) => {
+      const filePath = path.join(tempDir, `screenshot_${index + 1}.png`);
+      saveBase64Image(screenshot.screenshot, filePath);
+    });
+
+    const zipPath = path.join(__dirname, `screenshots_${screenshotCount}.zip`);
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiver("zip", { zlib: { level: 9 } });
+
+    output.on("close", async () => {
+      // Send the ZIP file for download
+      res.download(zipPath, `screenshots_${screenshotCount}.zip`, async (err) => {
+        if (err) {
+          console.error("Error sending zip file:", err);
+        } else {
+          try {
+            // Log the IDs to ensure they are valid
+            const screenshotIds = screenshots.map(ss => ss._id);
+            console.log("Screenshots IDs to delete:", screenshotIds);
+
+            if (screenshotIds.length > 0) {
+              // Attempt to delete the screenshots from the database after successful download
+              const deleteResult = await Screenshot.deleteMany({ _id: { $in: screenshotIds } });
+              console.log(`Deleted ${deleteResult.deletedCount} screenshots from the database.`);
+            } else {
+              console.error("No valid screenshot IDs found for deletion.");
+            }
+
+            // Delete ZIP and temp screenshots after download
+            fs.unlinkSync(zipPath);  // Delete the ZIP file
+            fs.rmSync(tempDir, { recursive: true, force: true });  // Delete the temp directory and screenshots
+          } catch (deleteError) {
+            console.error("Error deleting screenshots from database:", deleteError);
+          }
+        }
+      });
+    });
+
+    archive.on("error", (err) => {
+      console.error("Archive error:", err);
+      res.status(500).json({ error: "Error creating ZIP file." });
+    });
+
+    archive.pipe(output);
+
+    fs.readdirSync(tempDir).forEach((file) => {
+      archive.file(path.join(tempDir, file), { name: file });
+    });
+
+    archive.finalize();
+  } catch (error) {
+    console.error("Error downloading screenshots:", error);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
 
 
 
