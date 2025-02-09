@@ -8,66 +8,68 @@ const archiver = require("archiver");
 const fs = require("fs");
 const path = require("path");
 
-// // POST: Save a screenshot to the database
-// router.post("/", async (req, res) => {
-//   try {
-//     const { screenshot, timestamp } = req.body;
-
-//     if (!screenshot) {
-//       return res.status(400).json({ error: "Screenshot data is required." });
-//     }
-
-//     const newScreenshot = new Screenshot({ screenshot, timestamp });
-//     await newScreenshot.save();
-
-//     console.log("SS Success");
-
-//     res.status(201).json({ message: "Screenshot saved successfully." });
-//   } catch (error) {
-//     console.error("Error saving screenshot:", error);
-//     res.status(500).json({ error: "Internal server error." });
-//   }
-// });
-
+// POST: Save a screenshot to the database
 router.post("/", async (req, res) => {
   try {
     const { screenshot, timestamp } = req.body;
 
-    // Validate the screenshot field (Base64 image)
-    if (!screenshot || !/^data:image\/(png|jpeg|jpg);base64,/.test(screenshot)) {
-      return res.status(400).json({ error: "Invalid image format. Must be Base64-encoded PNG/JPG." });
+    if (!screenshot) {
+      return res.status(400).json({ error: "Screenshot data is required." });
     }
 
-    // Create FormData for ImageBB
-    const form = new FormData();
-    form.append("key", '21ec0f957d13640bc92a530e788f6b1e');
-    form.append("image", screenshot.split(",")[1]); // Remove the Base64 prefix
-
-    // Upload image to ImageBB
-    const response = await axios.post("https://api.imgbb.com/1/upload", form, {
-      headers: form.getHeaders(),
-    });
-
-    if (!response.data?.data?.url) {
-      throw new Error("ImageBB upload failed.");
-    }
-
-    const imageUrl = response.data.data.url; // Get the ImageBB URL
-
-    // Save imageUrl and timestamp to the database
-    const newScreenshot = new Screenshot({ screenshot: imageUrl, timestamp: timestamp});
+    const newScreenshot = new Screenshot({ screenshot, timestamp });
     await newScreenshot.save();
 
-    console.log("Screenshot saved:", imageUrl);
-    res.status(201).json({ message: "Screenshot saved successfully.", imageUrl });
+    console.log("SS Success");
 
+    res.status(201).json({ message: "Screenshot saved successfully." });
   } catch (error) {
     console.error("Error saving screenshot:", error);
     res.status(500).json({ error: "Internal server error." });
   }
 });
 
+// router.post("/", async (req, res) => {
+//   try {
+//     const { screenshot, timestamp } = req.body;
+
+//     // Validate the screenshot field (Base64 image)
+//     if (!screenshot || !/^data:image\/(png|jpeg|jpg);base64,/.test(screenshot)) {
+//       return res.status(400).json({ error: "Invalid image format. Must be Base64-encoded PNG/JPG." });
+//     }
+
+//     // Create FormData for ImageBB
+//     const form = new FormData();
+//     form.append("key", '21ec0f957d13640bc92a530e788f6b1e');
+//     form.append("image", screenshot.split(",")[1]); // Remove the Base64 prefix
+
+//     // Upload image to ImageBB
+//     const response = await axios.post("https://api.imgbb.com/1/upload", form, {
+//       headers: form.getHeaders(),
+//     });
+
+//     if (!response.data?.data?.url) {
+//       throw new Error("ImageBB upload failed.");
+//     }
+
+//     const imageUrl = response.data.data.url; // Get the ImageBB URL
+
+//     // Save imageUrl and timestamp to the database
+//     const newScreenshot = new Screenshot({ screenshot: imageUrl, timestamp: timestamp});
+//     await newScreenshot.save();
+
+//     console.log("Screenshot saved:", imageUrl);
+//     res.status(201).json({ message: "Screenshot saved successfully.", imageUrl });
+
+//   } catch (error) {
+//     console.error("Error saving screenshot:", error);
+//     res.status(500).json({ error: "Internal server error." });
+//   }
+// });
+
 // GET: Paginated screenshots
+
+
 router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 20, filterDate } = req.query;
