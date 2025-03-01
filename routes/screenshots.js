@@ -3,12 +3,36 @@ const Screenshot = require("../models/Screenshots");
 const router = express.Router();
 const axios = require("axios");
 const FormData = require("form-data"); // ✅ Import FormData
+const sharp = require("sharp"); // Install sharp using: npm install sharp
+
 
 const archiver = require("archiver");
 const fs = require("fs");
 const path = require("path");
 
-// POST: Save a screenshot to the database
+// // POST: Save a screenshot to the database (Base64 image)
+// router.post("/", async (req, res) => {
+//   try {
+//     const { screenshot, timestamp } = req.body;
+
+//     if (!screenshot) {
+//       return res.status(400).json({ error: "Screenshot data is required." });
+//     }
+
+//     const newScreenshot = new Screenshot({ screenshot, timestamp });
+//     await newScreenshot.save();
+
+//     console.log("SS Success");
+
+//     res.status(201).json({ message: "Screenshot saved successfully." });
+//   } catch (error) {
+//     console.error("Error saving screenshot:", error);
+//     res.status(500).json({ error: "Internal server error." });
+//   }
+// });
+
+
+// POST: Save a compressed screenshot to the database (Base64 image - 30kb limit)
 router.post("/", async (req, res) => {
   try {
     const { screenshot, timestamp } = req.body;
@@ -17,10 +41,31 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Screenshot data is required." });
     }
 
-    const newScreenshot = new Screenshot({ screenshot, timestamp });
+    // Convert Base64 to Buffer
+    const buffer = Buffer.from(screenshot.split(",")[1], "base64");
+
+    // Compress the image without changing resolution
+    let quality = 80; // Initial guess
+    let compressedBuffer = await sharp(buffer)
+      .jpeg({ quality }) // Adjust quality
+      .toBuffer();
+
+    // Dynamically adjust quality to ensure size is <= 30KB
+    while (compressedBuffer.length > 30 * 1024 && quality > 10) {
+      quality -= 5; // Reduce quality step by step
+      compressedBuffer = await sharp(buffer)
+        .jpeg({ quality })
+        .toBuffer();
+    }
+
+    // Convert back to Base64
+    const compressedBase64 = `data:image/jpeg;base64,${compressedBuffer.toString("base64")}`;
+
+    // Save to DB
+    const newScreenshot = new Screenshot({ screenshot: compressedBase64, timestamp });
     await newScreenshot.save();
 
-    console.log("SS Success");
+    console.log(`SS Success - Final Size: ${compressedBuffer.length / 1024} KB, Quality: ${quality}`);
 
     res.status(201).json({ message: "Screenshot saved successfully." });
   } catch (error) {
@@ -29,6 +74,51 @@ router.post("/", async (req, res) => {
   }
 });
 
+
+// POST: Save a compressed screenshot to the database (Base64 image - 100kb limit)
+// router.post("/", async (req, res) => {
+//   try {
+//     const { screenshot, timestamp } = req.body;
+
+//     if (!screenshot) {
+//       return res.status(400).json({ error: "Screenshot data is required." });
+//     }
+
+//     // Convert Base64 to Buffer
+//     const buffer = Buffer.from(screenshot.split(",")[1], "base64");
+
+//     // Initial quality guess
+//     let quality = 90; 
+//     let compressedBuffer = await sharp(buffer)
+//       .jpeg({ quality }) // Set initial quality
+//       .toBuffer();
+
+//     // Adjust quality dynamically to keep file size ≤ 100KB
+//     while (compressedBuffer.length > 100 * 1024 && quality > 10) {
+//       quality -= 5; // Reduce quality step by step
+//       compressedBuffer = await sharp(buffer)
+//         .jpeg({ quality })
+//         .toBuffer();
+//     }
+
+//     // Convert back to Base64
+//     const compressedBase64 = `data:image/jpeg;base64,${compressedBuffer.toString("base64")}`;
+
+//     // Save to DB
+//     const newScreenshot = new Screenshot({ screenshot: compressedBase64, timestamp });
+//     await newScreenshot.save();
+
+//     console.log(`SS Success - Final Size: ${(compressedBuffer.length / 1024).toFixed(2)} KB, Quality: ${quality}`);
+
+//     res.status(201).json({ message: "Screenshot saved successfully." });
+//   } catch (error) {
+//     console.error("Error saving screenshot:", error);
+//     res.status(500).json({ error: "Internal server error." });
+//   }
+// });
+
+
+// // POST: Save a screenshot to the database (Base64 image) and upload to ImageBB
 // router.post("/", async (req, res) => {
 //   try {
 //     const { screenshot, timestamp } = req.body;

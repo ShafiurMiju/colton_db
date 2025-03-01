@@ -7,7 +7,7 @@ const screenshotRoutes = require("./routes/screenshots");
 const cors = require("cors"); // Import cors
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // Middleware
 app.use(bodyParser.json({ limit: "10mb" })); // Increase payload size for screenshots
@@ -35,6 +35,28 @@ mongoose
 // Routes
 app.use("/api/history", historyRoutes);
 app.use("/api/screenshots", screenshotRoutes);
+
+
+// === MongoDB Storage Stats Route (Total, Used, and Unused Storage in MB) ===
+app.get("/api/db-storage", async (req, res) => {
+  try {
+    const stats = await mongoose.connection.db.stats();
+
+    const totalStorageMB = (stats.storageSize / (1024 * 1024)).toFixed(2);
+    const usedStorageMB = (stats.dataSize / (1024 * 1024)).toFixed(2);
+    const unusedStorageMB = (totalStorageMB - usedStorageMB).toFixed(2);
+
+    res.json({
+      totalStorageMB,
+      usedStorageMB,
+      unusedStorageMB
+    });
+
+  } catch (error) {
+    console.error("Error fetching DB storage stats:", error);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
 
 // Start the server
 app.listen(PORT, () => {
