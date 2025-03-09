@@ -162,7 +162,7 @@ router.post("/", async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
-    const { page = 1, limit = 20, filterDate } = req.query;
+    const { page = 1, limit = 200, filterDate } = req.query;
     const skip = (page - 1) * limit;
 
     const filter = {};
